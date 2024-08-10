@@ -11,6 +11,8 @@ enum eMode : unsigned char
 	m27C256 = 1,
 	m27C010 = 2,
 	m27C020 = 3,
+	m27C040 = 4,
+	m27C080 = 5,
 };
 
 #define ROM_BUFFER_LEN (256*1024)
@@ -19,8 +21,8 @@ const char *filename = "rom.bin";
 eMode mode = m27C020;
 Stream* stream;
 
-int32_t inPins[] = { 19,18,14,15,40,41,17,16,22,23,20,21,38,39,26,27,24,25,-1 };
-int32_t outPins[] = { 10,12,11,13,8,7,36,37,-1 };
+int32_t inPins[] = { 19,18,14,15,40,41,17,16,22,23,20,21,38,39,26,27,2,3,4,33, -1 };
+int32_t outPins[] = { 10,12,11,13,8,7,36,37, -1 };
 
 void readData(Stream* s)
 {
@@ -93,6 +95,7 @@ void setup()
 
 void loop()
 {
+	uint32_t io4 = GPIO4_DR;
 	uint32_t io6 = GPIO6_DR;
 	uint32_t outb = 0;
 
@@ -108,14 +111,25 @@ void loop()
 
 		// 1Mbit, 128KB, 0x00000-0x1FFFF
 		case m27C010:
-			addr = ((io6 >> 16) & 0xFFFF) | ((io6 & 0x1000) << 4);
+			addr = ((io6 >> 16) & 0xFFFF) | ((io4 << 12) & 0x10000);
 			break;
 
 		// 2Mbit, 256KB, 0x00000-0x3FFFF
 		case m27C020:
 		default:
-			addr = ((io6 >> 16) & 0xFFFF) | ((io6 & 0x3000) << 4);
+			addr = ((io6 >> 16) & 0xFFFF) | ((io4 << 12) & 0x30000);
 			break;
+
+		// 4Mbit, 512KB, 0x00000-0x7FFFF
+		case m27C040:
+			addr = ((io6 >> 16) & 0xFFFF) | ((io4 << 12) & 0x70000);
+			break;
+
+		// 8Mbit, 1MB, 0x00000-0xFFFFF
+		case m27C080:
+			addr = ((io6 >> 16) & 0xFFFF) | ((io4 << 12) & 0xF0000);
+			break;
+
 	}
 
 	// get byte at addr
@@ -133,7 +147,11 @@ void loop()
 		readData(&Serial1);
 }
 
-
+//  DM     Non-DMA
+// GPIO1 == GPIO6
+// GPIO2 == GPIO7
+// GPIO3 == GPIO8
+// GPIO4 == GPIO9
 
 // addr
 // GPIO6-16 -> 19 A0
@@ -152,6 +170,7 @@ void loop()
 // GPIO6-29 -> 39 A13
 // GPIO6-30 -> 26 A14
 // GPIO6-31 -> 27 A15
+// --
 // GPIO9-04 -> 02 A16
 // GPIO9-05 -> 03 A17
 // GPIO9-06 -> 04 A18
@@ -162,16 +181,19 @@ void loop()
 // GPIO7-01 -> 12 D1
 // GPIO7-02 -> 11 D2
 // GPIO7-03 -> 13 D3
+// --
 // GPIO7-16 -> 08 D4
 // GPIO7-17 -> 07 D5
 // GPIO7-18 -> 36 D6
 // GPIO7-19 -> 37 D7
 
+// ---------------------------
+
 // the rest
-// GPIO6-12 -> 24
-// GPIO6-13 -> 25
 // GPIO6-02 -> 01
 // GPIO6-03 -> 00
+// GPIO6-12 -> 24
+// GPIO6-13 -> 25
 
 // GPIO7-10 -> 06
 // GPIO7-11 -> 09
