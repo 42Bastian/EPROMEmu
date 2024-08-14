@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "SendEPROM": {
+      "commandName": "Project",
+      "commandLineArgs": "-m asdf"
+    }
+  }
+}

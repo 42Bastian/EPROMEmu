@@ -1,26 +1,45 @@
-#include <Arduino.h>
-#include <SPI.h>
-#include <SD.h>
-
 // FLASHMEM
 // DMAMEM
 // PROGMEM
 
+#define USE_FLASH 1
+//#define USE_SD    1
+
+#include <Arduino.h>
+#include <SPI.h>
+
+#ifdef USE_FLASH
+#include <LittleFS.h>
+LittleFS_Program flash;
+#elif USE_SD
+#include <SD.h>
+#endif
+
 enum eMode : unsigned char
 {
-	m27C256 = 1,
-	m27C010 = 2,
-	m27C020 = 3,
-	m27C040 = 4,
-	m27C080 = 5,
+	// 24 pin EPROMs
+	m2708  = 1,
+	m2716  = 2,
+	m2732  = 3,
+
+	// 28 pin EPROMs
+	m2764  = 4,
+	m27128 = 5,
+	m27256 = 6,
+	m27512 = 7,
+
+	// 32 pin EPROMs
+	m27010 = 8,
+	m27020 = 9,
+	m27040 = 10,
+	m27080 = 11,
 };
 
 #define ROM_BUFFER_LEN (1024*1024)
 EXTMEM char buffer[ROM_BUFFER_LEN];
 const char *filename = "rom.bin";
-eMode epromMode = m27C020;
+eMode epromMode = m27020;
 bool lynxMode = false;
-Stream* stream;
 
 int32_t inPins[] = { 19,18,14,15,40,41,17,16,22,23,20,21,38,39,26,27,2,3,4,33, -1 };
 int32_t outPins[] = { 10,12,11,13,8,7,36,37, -1 };
@@ -54,9 +73,13 @@ void readData(Stream* s)
 	}
 	while(read != 0);
 
+#ifdef USE_FLASH
+	flash.remove(filename);
+	File f = flash.open(filename, FILE_WRITE);
+#elif USE_SD
 	SD.remove(filename);
-
 	File f = SD.open(filename, O_WRITE);
+#endif
 	f.write(epromMode);
 	f.write(lynxMode);
 	f.write(buffer, total);
@@ -71,17 +94,29 @@ void setPinMode(int32_t* pins, int32_t direction)
 
 void setup()
 {
-	epromMode = m27C256;
+	Serial.begin(115200);
+
+#ifdef USE_FLASH
+	flash.begin(ROM_BUFFER_LEN);
+#elif USE_SD
+	SD.begin(BUILTIN_SDCARD);
+#endif
+
+	epromMode = m2708;
 
 	setPinMode(inPins, INPUT);
 	setPinMode(outPins, OUTPUT);
 	GPIO7_DR = 0;
 
-	SD.begin(BUILTIN_SDCARD);
-
+#ifdef USE_FLASH
+	if(flash.exists(filename))
+	{
+		File f = flash.open(filename, FILE_READ);
+#elif USE_SD
 	if(SD.exists(filename))
 	{
 		File f = SD.open(filename, O_READ);
+#endif
 		size_t size = f.size();
 		epromMode = (eMode)f.read();
 		lynxMode = f.read();
@@ -89,29 +124,23 @@ void setup()
 		f.read(buffer, size);
 		f.close();
 	}
-
-	Serial.begin(115200);
 }
 
 void loop()
 {
-	uint32_t io6 = GPIO6_DR;
-	uint32_t io9 = GPIO9_DR;
-
-	uint32_t outb = 0;
-
-	// read address pins
-	uint32_t addr = 0;
+	uint32_t io6 = GPIO6_DR;	//  A0 - A15
+	uint32_t io9 = GPIO9_DR;	// A16 - A19
+	uint32_t addr = 0;			// calculated address
 
 	switch(epromMode)
 	{
 		// 256Kbit, 32KB, 0x0000-0x7FFF
-		case m27C256:
+		case m27256:
 			addr = ((io6 >> 16) & 0x7FFF);
 			break;
 
 		// 1Mbit, 128KB, 0x00000-0x1FFFF
-		case m27C010:
+		case m27010:
 			if(lynxMode)
 			{
 				addr =   (io6 >> 16) & 0x001FF;  // Lynx A0 - A8   -> EPROM A0 - A8
@@ -123,7 +152,7 @@ void loop()
 			break;
 
 		// 2Mbit, 256KB, 0x00000-0x3FFFF
-		case m27C020:
+		case m27020:
 		default:
 			if(lynxMode)
 			{
@@ -136,23 +165,21 @@ void loop()
 			break;
 
 		// 4Mbit, 512KB, 0x00000-0x7FFFF
-		case m27C040:
+		case m27040:
 			addr = ((io6 >> 16) & 0xFFFF) | ((io9 << 12) & 0x70000);
 			break;
 
 		// 8Mbit, 1MB, 0x00000-0xFFFFF
-		case m27C080:
+		case m27080:
 			addr = ((io6 >> 16) & 0xFFFF) | ((io9 << 12) & 0xF0000);
 			break;
-
 	}
 
 	// get byte at addr
-	char b = buffer[addr];
+	unsigned char b = buffer[addr];
 
 	// set data pins
-	outb = ((b & 0x0F) << 0) | ((b & 0xF0) << 12);
-	GPIO7_DR = outb;
+	GPIO7_DR = ((b & 0x0F) << 0) | ((b & 0xF0) << 12);
 
 	// read file from either serial port, if available
 	if(Serial.available())
