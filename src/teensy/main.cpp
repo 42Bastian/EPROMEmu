@@ -11,16 +11,19 @@ enum eMode : unsigned char
 	m27C256 = 1,
 	m27C010 = 2,
 	m27C020 = 3,
+	m27C040 = 4,
+	m27C080 = 5,
 };
 
-#define ROM_BUFFER_LEN (256*1024)
+#define ROM_BUFFER_LEN (1024*1024)
 EXTMEM char buffer[ROM_BUFFER_LEN];
 const char *filename = "rom.bin";
-eMode mode = m27C020;
+eMode epromMode = m27C020;
+bool lynxMode = false;
 Stream* stream;
 
-int32_t inPins[] = { 19,18,14,15,40,41,17,16,22,23,20,21,38,39,26,27,24,25,-1 };
-int32_t outPins[] = { 10,12,11,13,8,7,36,37,-1 };
+int32_t inPins[] = { 19,18,14,15,40,41,17,16,22,23,20,21,38,39,26,27,2,3,4,33, -1 };
+int32_t outPins[] = { 10,12,11,13,8,7,36,37, -1 };
 
 void readData(Stream* s)
 {
@@ -28,7 +31,8 @@ void readData(Stream* s)
 	char buff[length];
 	int total = 0;
 
-	mode = (eMode)s->read();
+	epromMode = (eMode)s->read();
+	lynxMode  = (bool)s->read();
 
 	memset(buffer, 0xFF, ROM_BUFFER_LEN);
 
@@ -53,6 +57,8 @@ void readData(Stream* s)
 	SD.remove(filename);
 
 	File f = SD.open(filename, O_WRITE);
+	f.write(epromMode);
+	f.write(lynxMode);
 	f.write(buffer, total);
 	f.close();
 }
@@ -65,7 +71,7 @@ void setPinMode(int32_t* pins, int32_t direction)
 
 void setup()
 {
-	mode = m27C256;
+	epromMode = m27C256;
 
 	setPinMode(inPins, INPUT);
 	setPinMode(outPins, OUTPUT);
@@ -77,29 +83,27 @@ void setup()
 	{
 		File f = SD.open(filename, O_READ);
 		size_t size = f.size();
+		epromMode = (eMode)f.read();
+		lynxMode = f.read();
+
 		f.read(buffer, size);
 		f.close();
-
-		if(size > 32*1024)
-			mode = m27C010;
-
-		if(size > 128*1024)
-			mode = m27C020;
 	}
 
 	Serial.begin(115200);
-	Serial1.begin(3000000);
 }
 
 void loop()
 {
 	uint32_t io6 = GPIO6_DR;
+	uint32_t io9 = GPIO9_DR;
+
 	uint32_t outb = 0;
 
 	// read address pins
 	uint32_t addr = 0;
 
-	switch(mode)
+	switch(epromMode)
 	{
 		// 256Kbit, 32KB, 0x0000-0x7FFF
 		case m27C256:
@@ -108,14 +112,39 @@ void loop()
 
 		// 1Mbit, 128KB, 0x00000-0x1FFFF
 		case m27C010:
-			addr = ((io6 >> 16) & 0xFFFF) | ((io6 & 0x1000) << 4);
+			if(lynxMode)
+			{
+				addr =   (io6 >> 16) & 0x001FF;  // Lynx A0 - A8   -> EPROM A0 - A8
+				addr |=  (io6 >> 18) & 0x03E00;  // Lynx A12 - A17 -> EPROM A11 - A15
+				addr |= ((io9 << 10) & 0x1C000); // Lynx A18 - A19 -> EPROM A16
+			}
+			else
+				addr = ((io6 >> 16) & 0xFFFF) | ((io9 << 12) & 0x10000);
 			break;
 
 		// 2Mbit, 256KB, 0x00000-0x3FFFF
 		case m27C020:
 		default:
-			addr = ((io6 >> 16) & 0xFFFF) | ((io6 & 0x3000) << 4);
+			if(lynxMode)
+			{
+				addr =   (io6 >> 16) & 0x003FF;  // Lynx A0 - A9   -> EPROM A0 - A9
+				addr |=  (io6 >> 17) & 0x07C00;  // Lynx A12 - A17 -> EPROM A11 - A15
+				addr |= ((io9 << 11) & 0x38000); // Lynx A18 - A19 -> EPROM A16 - A17
+			}
+			else
+				addr = ((io6 >> 16) & 0xFFFF) | ((io9 << 12) & 0x30000);
 			break;
+
+		// 4Mbit, 512KB, 0x00000-0x7FFFF
+		case m27C040:
+			addr = ((io6 >> 16) & 0xFFFF) | ((io9 << 12) & 0x70000);
+			break;
+
+		// 8Mbit, 1MB, 0x00000-0xFFFFF
+		case m27C080:
+			addr = ((io6 >> 16) & 0xFFFF) | ((io9 << 12) & 0xF0000);
+			break;
+
 	}
 
 	// get byte at addr
@@ -128,12 +157,13 @@ void loop()
 	// read file from either serial port, if available
 	if(Serial.available())
 		readData(&Serial);
-
-	if(Serial1.available())
-		readData(&Serial1);
 }
 
-
+//  DM     Non-DMA
+// GPIO1 == GPIO6
+// GPIO2 == GPIO7
+// GPIO3 == GPIO8
+// GPIO4 == GPIO9
 
 // addr
 // GPIO6-16 -> 19 A0
@@ -152,6 +182,7 @@ void loop()
 // GPIO6-29 -> 39 A13
 // GPIO6-30 -> 26 A14
 // GPIO6-31 -> 27 A15
+// --
 // GPIO9-04 -> 02 A16
 // GPIO9-05 -> 03 A17
 // GPIO9-06 -> 04 A18
@@ -162,16 +193,19 @@ void loop()
 // GPIO7-01 -> 12 D1
 // GPIO7-02 -> 11 D2
 // GPIO7-03 -> 13 D3
+// --
 // GPIO7-16 -> 08 D4
 // GPIO7-17 -> 07 D5
 // GPIO7-18 -> 36 D6
 // GPIO7-19 -> 37 D7
 
+// ---------------------------
+
 // the rest
-// GPIO6-12 -> 24
-// GPIO6-13 -> 25
 // GPIO6-02 -> 01
 // GPIO6-03 -> 00
+// GPIO6-12 -> 24
+// GPIO6-13 -> 25
 
 // GPIO7-10 -> 06
 // GPIO7-11 -> 09
