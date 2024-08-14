@@ -134,9 +134,39 @@ void loop()
 
 	switch(epromMode)
 	{
+		// 8Kbit, 1KB, 0x0000-0x03FF
+		case m2708:
+			addr = ((io6 >> 16) & 0x07FF);
+			break;
+
+		// 16Kbit, 2KB, 0x0000-0x07FF
+		case m2716:
+			addr = ((io6 >> 16) & 0x07FF);
+			break;
+
+		// 32Kbit, 4KB, 0x0000-0x0FFF
+		case m2732:
+			addr = ((io6 >> 16) & 0x0FFF);
+			break;
+
+		// 64Kbit, 8KB, 0x0000-0x1FFF
+		case m2764:
+			addr = ((io6 >> 16) & 0x1FFF);
+			break;
+
+		// 128Kbit, 16KB, 0x0000-0x3FFF
+		case m27128:
+			addr = ((io6 >> 16) & 0x3FFF);
+			break;
+
 		// 256Kbit, 32KB, 0x0000-0x7FFF
 		case m27256:
 			addr = ((io6 >> 16) & 0x7FFF);
+			break;
+
+		// 512Kbit, 64KB, 0x0000-0xFFFF
+		case m27512:
+			addr = ((io6 >> 16) & 0xFFFF);
 			break;
 
 		// 1Mbit, 128KB, 0x00000-0x1FFFF
@@ -153,7 +183,6 @@ void loop()
 
 		// 2Mbit, 256KB, 0x00000-0x3FFFF
 		case m27020:
-		default:
 			if(lynxMode)
 			{
 				addr =   (io6 >> 16) & 0x003FF;  // Lynx A0 - A9   -> EPROM A0 - A9
@@ -166,6 +195,7 @@ void loop()
 
 		// 4Mbit, 512KB, 0x00000-0x7FFFF
 		case m27040:
+		default:
 			addr = ((io6 >> 16) & 0xFFFF) | ((io9 << 12) & 0x70000);
 			break;
 
