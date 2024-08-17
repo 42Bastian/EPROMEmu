@@ -2,18 +2,9 @@
 // DMAMEM
 // PROGMEM
 
-#define USE_FLASH 1
-//#define USE_SD    1
-
 #include <Arduino.h>
 #include <SPI.h>
-
-#ifdef USE_FLASH
-#include <LittleFS.h>
-LittleFS_Program flash;
-#elif USE_SD
 #include <SD.h>
-#endif
 
 enum eMode : unsigned char
 {
@@ -35,58 +26,79 @@ enum eMode : unsigned char
 	m27080 = 11,
 };
 
-#define ROM_BUFFER_LEN (1024*1024)
-EXTMEM char buffer[ROM_BUFFER_LEN];
-const char *filename = "rom.bin";
-eMode epromMode = m27020;
-bool lynxMode = false;
+struct Settings
+{
+	eMode epromMode = m27020;
+	bool  lynxMode = false;
+};
 
-int32_t inPins[] = { 19,18,14,15,40,41,17,16,22,23,20,21,38,39,26,27,2,3,4,33, -1 };
-int32_t outPins[] = { 10,12,11,13,8,7,36,37, -1 };
+#define ROM_BUFFER_LEN       (256*1024)
+#define TOTAL_ROM_BUFFER_LEN (2*ROM_BUFFER_LEN)
+#define ROM_BUFFER_HI_MASK   (ROM_BUFFER_LEN-1)
 
-void readData(Stream* s)
+       unsigned char bufferLo[ROM_BUFFER_LEN];
+DMAMEM unsigned char bufferHi[ROM_BUFFER_LEN];
+
+const int32_t inPins[]  = { 19,18,14,15,40,41,17,16,22,23,20,21,38,39,26,27,2,3,4,33, -1 };
+const int32_t outPins[] = { 10,12,11,13,8,7,36,37, -1 };
+
+const char *filenameSettings = "settings.bin";
+const char *filenameLo       = "romLo.bin";
+const char *filenameHi       = "romHi.bin";
+
+FS* g_fs;
+Settings g_settings;
+
+void readChunk(Stream* s, unsigned char* buffer, const char* filename)
 {
 	const int length = 1024;
-	char buff[length];
-	int total = 0;
-
-	epromMode = (eMode)s->read();
-	lynxMode  = (bool)s->read();
+	char chunk[length];
+	size_t read = 0;
+	size_t total = 0;
+	unsigned char* start = buffer;
 
 	memset(buffer, 0xFF, ROM_BUFFER_LEN);
 
-	size_t read = 0;
-	char* p = buffer;
-
 	do
 	{
-		memset(buff, 0, length);
+		memset(chunk, 0, length);
 
-		read = s->readBytes(buff, length);
+		read = s->readBytes(chunk, length);
 
 		if(read > 0)
 		{
-			memcpy(p, buff, read);
-			p += read;
+			memcpy(buffer, chunk, read);
+			buffer += read;
 			total += read;
 		}
 	}
-	while(read != 0);
+	while(read != 0 && total < ROM_BUFFER_LEN);
 
-#ifdef USE_FLASH
-	flash.remove(filename);
-	File f = flash.open(filename, FILE_WRITE);
-#elif USE_SD
-	SD.remove(filename);
-	File f = SD.open(filename, O_WRITE);
-#endif
-	f.write(epromMode);
-	f.write(lynxMode);
-	f.write(buffer, total);
-	f.close();
+	g_fs->remove(filename);
+
+	if(total > 0)
+	{
+		File f = g_fs->open(filename, FILE_WRITE);
+		f.write(start, total);
+		f.close();
+	}
 }
 
-void setPinMode(int32_t* pins, int32_t direction)
+void readData(Stream* s)
+{
+	g_settings.epromMode = (eMode)s->read();
+	g_settings.lynxMode  = (bool)s->read();
+
+	g_fs->remove(filenameSettings);
+	File f = g_fs->open(filenameSettings, FILE_WRITE);
+	f.write(&g_settings, sizeof(Settings));
+	f.close();
+
+	readChunk(s, bufferLo, filenameLo);
+	readChunk(s, bufferHi, filenameHi);
+}
+
+void setPinMode(const int32_t* pins, int32_t direction)
 {
 	for(int i = 0; pins[i] != -1; i++)
 		pinMode(pins[i], direction);
@@ -96,34 +108,33 @@ void setup()
 {
 	Serial.begin(115200);
 
-#ifdef USE_FLASH
-	flash.begin(ROM_BUFFER_LEN);
-#elif USE_SD
 	SD.begin(BUILTIN_SDCARD);
-#endif
+	g_fs = (FS*)&SD;
 
-	epromMode = m2708;
+	if(g_fs->exists(filenameSettings))
+	{
+		File f = g_fs->open(filenameSettings, FILE_READ);
+		f.read(&g_settings, sizeof(Settings));
+		f.close();
+	}
+
+	if(g_fs->exists(filenameLo))
+	{
+		File f = g_fs->open(filenameLo, FILE_READ);
+		f.read(bufferLo, f.size());
+		f.close();
+	}
+
+	if(g_fs->exists(filenameHi))
+	{
+		File f = g_fs->open(filenameHi, FILE_READ);
+		f.read(bufferHi, f.size());
+		f.close();
+	}
 
 	setPinMode(inPins, INPUT);
 	setPinMode(outPins, OUTPUT);
 	GPIO7_DR = 0;
-
-#ifdef USE_FLASH
-	if(flash.exists(filename))
-	{
-		File f = flash.open(filename, FILE_READ);
-#elif USE_SD
-	if(SD.exists(filename))
-	{
-		File f = SD.open(filename, O_READ);
-#endif
-		size_t size = f.size();
-		epromMode = (eMode)f.read();
-		lynxMode = f.read();
-
-		f.read(buffer, size);
-		f.close();
-	}
 }
 
 void loop()
@@ -132,7 +143,7 @@ void loop()
 	uint32_t io9 = GPIO9_DR;	// A16 - A19
 	uint32_t addr = 0;			// calculated address
 
-	switch(epromMode)
+	switch(g_settings.epromMode)
 	{
 		// 8Kbit, 1KB, 0x0000-0x03FF
 		case m2708:
@@ -171,7 +182,7 @@ void loop()
 
 		// 1Mbit, 128KB, 0x00000-0x1FFFF
 		case m27010:
-			if(lynxMode)
+			if(g_settings.lynxMode)
 			{
 				addr =   (io6 >> 16) & 0x001FF;  // Lynx A0 - A8   -> EPROM A0 - A8
 				addr |=  (io6 >> 18) & 0x03E00;  // Lynx A12 - A17 -> EPROM A11 - A15
@@ -183,7 +194,7 @@ void loop()
 
 		// 2Mbit, 256KB, 0x00000-0x3FFFF
 		case m27020:
-			if(lynxMode)
+			if(g_settings.lynxMode)
 			{
 				addr =   (io6 >> 16) & 0x003FF;  // Lynx A0 - A9   -> EPROM A0 - A9
 				addr |=  (io6 >> 17) & 0x07C00;  // Lynx A12 - A17 -> EPROM A11 - A15
@@ -205,8 +216,13 @@ void loop()
 			break;
 	}
 
+	unsigned char b;
+
 	// get byte at addr
-	unsigned char b = buffer[addr];
+	if(addr < ROM_BUFFER_LEN)
+		b = bufferLo[addr];
+	else
+		b = bufferHi[addr & ROM_BUFFER_HI_MASK];
 
 	// set data pins
 	GPIO7_DR = ((b & 0x0F) << 0) | ((b & 0xF0) << 12);
