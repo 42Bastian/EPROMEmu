@@ -9,6 +9,8 @@ epromemu-backups/
 schematic/*.bin
 schematic/*.lck
 schematic/*.zip
+schematic/production/
+fabrication-toolkit-options.json
 
 # For PCBs designed using KiCad: https://www.kicad.org/
 # Format documentation: https://kicad.org/help/file-formats/

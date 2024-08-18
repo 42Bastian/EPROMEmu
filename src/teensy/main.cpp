@@ -36,8 +36,8 @@ struct Settings
 #define TOTAL_ROM_BUFFER_LEN (2*ROM_BUFFER_LEN)
 #define ROM_BUFFER_HI_MASK   (ROM_BUFFER_LEN-1)
 
-       unsigned char bufferLo[ROM_BUFFER_LEN];
-DMAMEM unsigned char bufferHi[ROM_BUFFER_LEN];
+       unsigned char bufferLo[ROM_BUFFER_LEN] {};
+DMAMEM unsigned char bufferHi[ROM_BUFFER_LEN] {};
 
 const int32_t inPins[]  = { 19,18,14,15,40,41,17,16,22,23,20,21,38,39,26,27,2,3,4,33, -1 };
 const int32_t outPins[] = { 10,12,11,13,8,7,36,37, -1 };
@@ -46,10 +46,10 @@ const char *filenameSettings = "settings.bin";
 const char *filenameLo       = "romLo.bin";
 const char *filenameHi       = "romHi.bin";
 
-FS* g_fs;
-Settings g_settings;
+FS* g_fs = nullptr;
+Settings g_settings {};
 
-void readChunk(Stream* s, unsigned char* buffer, const char* filename)
+void readChunk(Stream* s, unsigned char* buffer, size_t size, const char* filename)
 {
 	const int length = 1024;
 	char chunk[length];
@@ -57,7 +57,7 @@ void readChunk(Stream* s, unsigned char* buffer, const char* filename)
 	size_t total = 0;
 	unsigned char* start = buffer;
 
-	memset(buffer, 0xFF, ROM_BUFFER_LEN);
+	memset(buffer, 0xFF, size);
 
 	do
 	{
@@ -72,7 +72,7 @@ void readChunk(Stream* s, unsigned char* buffer, const char* filename)
 			total += read;
 		}
 	}
-	while(read != 0 && total < ROM_BUFFER_LEN);
+	while(read != 0 && total < size);
 
 	g_fs->remove(filename);
 
@@ -94,8 +94,8 @@ void readData(Stream* s)
 	f.write(&g_settings, sizeof(Settings));
 	f.close();
 
-	readChunk(s, bufferLo, filenameLo);
-	readChunk(s, bufferHi, filenameHi);
+	readChunk(s, bufferLo, ROM_BUFFER_LEN, filenameLo);
+	readChunk(s, bufferHi, ROM_BUFFER_LEN, filenameHi);
 }
 
 void setPinMode(const int32_t* pins, int32_t direction)
@@ -206,7 +206,6 @@ void loop()
 
 		// 4Mbit, 512KB, 0x00000-0x7FFFF
 		case m27040:
-		default:
 			addr = ((io6 >> 16) & 0xFFFF) | ((io9 << 12) & 0x70000);
 			break;
 
