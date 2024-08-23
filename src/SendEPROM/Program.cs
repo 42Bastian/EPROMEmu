@@ -66,9 +66,11 @@ namespace SendEPROM
                 }
 
                 FileInfo file = validate.GetValueForArgument(fileArgument);
+                int skip = validate.GetValueForOption(skipOption);
+
                 if(file == null || !file.Exists)
                     validate.ErrorMessage = "File not specified";
-                else if(file.Length > Sizes[mode])
+                else if(file.Length - skip > Sizes[mode])
                     validate.ErrorMessage = "File is too large for selected EPROM mode";
             });
 
