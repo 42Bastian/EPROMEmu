@@ -5,8 +5,9 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <SD.h>
+#include <stdint.h>
 
-enum eMode : unsigned char
+enum eMode : uint8_t
 {
 	// 24 pin EPROMs
 	m2708  = 1,
@@ -32,43 +33,43 @@ struct Settings
 	bool  lynxMode = false;
 };
 
-#define ROM_BUFFER_LEN       (256*1024)
-#define TOTAL_ROM_BUFFER_LEN (2*ROM_BUFFER_LEN)
-#define ROM_BUFFER_HI_MASK   (ROM_BUFFER_LEN-1)
+constexpr uint32_t ROM_BUFFER_LEN       = (256*1024);
+constexpr uint32_t TOTAL_ROM_BUFFER_LEN = (2*ROM_BUFFER_LEN);
+constexpr uint32_t ROM_BUFFER_HI_MASK   = (ROM_BUFFER_LEN-1);
+constexpr uint16_t CHUNK_LENGTH         = (1024);
 
-       unsigned char bufferLo[ROM_BUFFER_LEN] {};
-DMAMEM unsigned char bufferHi[ROM_BUFFER_LEN] {};
+       uint8_t bufferLo[ROM_BUFFER_LEN] {};
+DMAMEM uint8_t bufferHi[ROM_BUFFER_LEN] {};
 
 const int32_t inPins[]  = { 19,18,14,15,40,41,17,16,22,23,20,21,38,39,26,27,2,3,4,33, -1 };
 const int32_t outPins[] = { 10,12,11,13,8,7,36,37, -1 };
 
-const char *filenameSettings = "settings.bin";
-const char *filenameLo       = "romLo.bin";
-const char *filenameHi       = "romHi.bin";
+constexpr const char *filenameSettings = "settings.bin";
+constexpr const char *filenameLo       = "romLo.bin";
+constexpr const char *filenameHi       = "romHi.bin";
 
 FS* g_fs = nullptr;
 Settings g_settings {};
 
-void readChunk(Stream* s, unsigned char* buffer, size_t size, const char* filename)
+void readChunk(Stream* s, uint8_t* buffer, size_t size, const char* filename)
 {
-	const int length = 1024;
-	char chunk[length];
+	uint8_t chunk[CHUNK_LENGTH];
 	size_t read = 0;
 	size_t total = 0;
-	unsigned char* start = buffer;
+	uint8_t* p = buffer;
 
 	memset(buffer, 0xFF, size);
 
 	do
 	{
-		memset(chunk, 0, length);
+		memset(chunk, 0, CHUNK_LENGTH);
 
-		read = s->readBytes(chunk, length);
+		read = s->readBytes(chunk, CHUNK_LENGTH);
 
 		if(read > 0)
 		{
-			memcpy(buffer, chunk, read);
-			buffer += read;
+			memcpy(p, chunk, read);
+			p += read;
 			total += read;
 		}
 	}
@@ -79,7 +80,7 @@ void readChunk(Stream* s, unsigned char* buffer, size_t size, const char* filena
 	if(total > 0)
 	{
 		File f = g_fs->open(filename, FILE_WRITE);
-		f.write(start, total);
+		f.write(buffer, total);
 		f.close();
 	}
 }
@@ -98,7 +99,7 @@ void readData(Stream* s)
 	readChunk(s, bufferHi, ROM_BUFFER_LEN, filenameHi);
 }
 
-void setPinMode(const int32_t* pins, int32_t direction)
+void setPinMode(const int32_t* pins, uint32_t direction)
 {
 	for(int i = 0; pins[i] != -1; i++)
 		pinMode(pins[i], direction);
@@ -215,7 +216,7 @@ void loop()
 			break;
 	}
 
-	unsigned char b;
+	uint8_t b;
 
 	// get byte at addr
 	if(addr < ROM_BUFFER_LEN)
