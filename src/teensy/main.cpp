@@ -227,7 +227,7 @@ void loop()
 	// set data pins
 	GPIO7_DR = ((b & 0x0F) << 0) | ((b & 0xF0) << 12);
 
-	// read file from either serial port, if available
+	// read file from serial port, if available
 	if(Serial.available())
 		readData(&Serial);
 }
