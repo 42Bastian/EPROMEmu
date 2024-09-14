@@ -11,25 +11,26 @@ namespace SendEPROM
     {
         private static readonly List<int> Sizes = 
         [
-                   0,
-              1*1024,
-              2*1024,
-              4*1024,
-              8*1024,
-             16*1024,
-             32*1024,
-             64*1024,
-            128*1024,
-            256*1024,
-            512*1024,
-           1024*1024,
+                   0, // Auto mode
+              1*1024, // 2708
+              2*1024, // 2716
+              4*1024, // 2732
+              8*1024, // 2764
+             16*1024, // 27128
+             32*1024, // 27256
+             64*1024, // 27512
+            128*1024, // 27010
+            256*1024, // 27020
+            512*1024, // 27040
+           1024*1024, // 27080
         ];
 
         public static async Task<int> Main(string[] args)
         {
             var portOption = new Option<string>(["--port", "-p"], description: "COM port on which to send the file", getDefaultValue: () => "COM3");
             var baudOption = new Option<int>   (["--baud", "-b"], description: "Baud rate at which to send",         getDefaultValue: () => 115200);
-            var modeOption = new Option<byte>  (["--type", "-t"], description: "EPROM type\n" +
+            var modeOption = new Option<int>   (["--type", "-t"], description: "EPROM type\n" +
+                                                                               " 0 = Auto\n" +
                                                                                " 1 = 2708\n" +
                                                                                " 2 = 2716\n" +
                                                                                " 3 = 2732\n" +
@@ -40,7 +41,7 @@ namespace SendEPROM
                                                                                " 8 = 27010\n" +
                                                                                " 9 = 27020\n" +
                                                                                "10 = 27040\n" + 
-                                                                               "11 = 27080",                         getDefaultValue: () => 10);
+                                                                               "11 = 27080",                         getDefaultValue: () => 0);
             var skipOption = new Option<int>   (["--skip", "-s"], description: "Skip N bytes at start of file",      getDefaultValue: () => 0);
             var lynxOption = new Option<bool>  (["--lynx", "-l"], description: "Atari Lynx dev cart mode",           getDefaultValue: () => false);
 
@@ -58,8 +59,9 @@ namespace SendEPROM
 
             rootCmd.AddValidator(validate =>
             {
-                byte mode = validate.GetValueForOption(modeOption);
-                if(mode < 1 || mode > 11)
+                int mode = validate.GetValueForOption(modeOption);
+
+                if(mode < 0 || mode > 11)
                 {
                     validate.ErrorMessage = "Invalid mode specified";
                     return;
@@ -70,7 +72,7 @@ namespace SendEPROM
 
                 if(file == null || !file.Exists)
                     validate.ErrorMessage = "File not specified";
-                else if(file.Length - skip > Sizes[mode])
+                else if(mode > 0 && file.Length - skip > Sizes[mode])
                     validate.ErrorMessage = "File is too large for selected EPROM mode";
             });
 
@@ -84,8 +86,26 @@ namespace SendEPROM
             return await rootCmd.InvokeAsync(args);
         }
 
-        static void SendData(string port, int baud, byte mode, int skip, bool lynx, FileInfo file)
+        static void SendData(string port, int baud, int mode, int skip, bool lynx, FileInfo file)
         {
+            if(mode == 0)
+            {
+                for(int i = 0; i < 11; i++)
+                {
+                    if((1<<i)*1024 == file.Length)
+                    {
+                        mode = i+1;
+                        break;
+                    }
+                }
+
+                if(mode == 0)
+                {
+                    Console.WriteLine("Auto mode could not determine EPROM mode from file size");
+                    return;
+                }
+            }
+
 			Console.WriteLine($"Reading {file.FullName}");
 			byte[] buff = File.ReadAllBytes(file.FullName);
 
@@ -96,12 +116,9 @@ namespace SendEPROM
 			};
 			sp.Open();
 
-            if(mode != 0)
-            {
-                Console.WriteLine($"Sending mode {mode}, Lynx {lynx}");
-                byte[] modeBuff = { mode, lynx ? (byte)1 : (byte)0 };
-                sp.Write(modeBuff, 0, modeBuff.Length);
-            }
+            Console.WriteLine($"Sending mode {mode}, Lynx {lynx}");
+            byte[] modeBuff = { (byte)mode, lynx ? (byte)1 : (byte)0 };
+            sp.Write(modeBuff, 0, modeBuff.Length);
 
             Console.WriteLine($"Sending {buff.Length} bytes, skipping {skip} bytes");
             sp.Write(buff, skip, buff.Length - skip);
