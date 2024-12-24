@@ -30,7 +30,7 @@ enum eMode : uint8_t
 struct Settings
 {
 	eMode epromMode = m27020;
-	bool  lynxMode = false;
+	bool  lynxMode = true;
 };
 
 constexpr size_t   ROM_BUFFER_LEN       = (256*1024);
@@ -104,7 +104,7 @@ void setPinMode(const int32_t* pins, uint32_t direction)
 	for(int i = 0; pins[i] != -1; i++)
 		pinMode(pins[i], direction);
 }
-
+char stringHelp[256];
 void setup()
 {
 	Serial.begin(115200);
@@ -121,8 +121,11 @@ void setup()
 
 	if(g_fs->exists(filenameLo))
 	{
+//		Serial.write("=> Found romLo.bin\r\n");
 		File f = g_fs->open(filenameLo, FILE_READ);
-		f.read(bufferLo, f.size());
+		uint32_t sz = f.size();
+		sz = sz <= sizeof(bufferLo) ? sz : sizeof(bufferLo);
+		f.read(bufferLo, sz);
 		f.close();
 	}
 
@@ -143,6 +146,7 @@ void loop()
 	uint32_t io6 = (GPIO6_DR >> 16);	//  A0 - A15
 	uint32_t io9 = GPIO9_DR;			// A16 - A19
 	uint32_t addr = 0;					// calculated address
+
 
 	switch(g_settings.epromMode)
 	{
