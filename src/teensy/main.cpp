@@ -3,7 +3,7 @@
 // PROGMEM
 
 #include <Arduino.h>
-#include <SPI.h>
+//->#include <SPI.h>
 #include <SD.h>
 #include <stdint.h>
 
@@ -33,6 +33,20 @@ struct Settings
   bool  lynxMode = true;
 };
 
+typedef struct
+{
+  uint8_t   magic[4];
+  uint16_t   page_size_bank0;
+  uint16_t   page_size_bank1;
+  uint16_t   version;
+  char   cartname[32];
+  char   manufname[16];
+  char   rotation;
+  char audBit;
+  char eeprom;
+  char spare[3];
+} lnx_header_t;
+
 constexpr size_t   ROM_BUFFER_LEN       = (256*1024);
 constexpr uint32_t ROM_BUFFER_HI_MASK   = (ROM_BUFFER_LEN-1);
 constexpr size_t   TOTAL_ROM_BUFFER_LEN = (2*ROM_BUFFER_LEN);
@@ -51,7 +65,7 @@ const int32_t outPins[] = {
 constexpr const char *filenameSettings = "settings.bin";
 constexpr const char *filenameLo       = "romLo.bin";
 constexpr const char *filenameHi       = "romHi.bin";
-
+constexpr const char *filenameLNX      = "game.lnx";
 FS* g_fs = nullptr;
 Settings g_settings {};
 
@@ -108,21 +122,50 @@ void setPinMode(const int32_t* pins, uint32_t direction)
 
 char stringHelp[256];
 
+lnx_header_t lnx_header;
+
 void setup()
 {
-  Serial.begin(115200);
+  Serial.begin(115200*8);
 
   SD.begin(BUILTIN_SDCARD);
   g_fs = (FS*)&SD;
 
-  if ( g_fs->exists(filenameSettings))    {
-      File f = g_fs->open(filenameSettings, FILE_READ);
-      f.read(&g_settings, sizeof(Settings));
-      f.close();
+//->  if ( g_fs->exists(filenameSettings))    {
+//->      File f = g_fs->open(filenameSettings, FILE_READ);
+//->      f.read(&g_settings, sizeof(Settings));
+//->      f.close();
+//->    }
+  if ( g_fs->exists(filenameLNX)) {
+    printf("=> Found game.lnx:");
+    File f = g_fs->open(filenameLNX, FILE_READ);
+    int32_t sz = (int32_t)f.size();
+    f.read(&lnx_header,64);
+    printf("Size %ld\r\n",sz);
+    Serial.flush();
+    sz -= 64;
+    f.read(bufferLo, min(sz,(int32_t)sizeof(bufferLo)));
+    sz -= sizeof(bufferLo);
+    if ( sz > 0 ){
+      f.read(bufferHi,sz);
     }
-
-  if ( g_fs->exists(filenameLo)) {
-      //		Serial.write("=> Found romLo.bin\r\n");
+    switch (lnx_header.page_size_bank0){
+    case 512:
+      g_settings.epromMode = m27010;
+      break;
+    case 1024:
+      g_settings.epromMode = m27020;
+      break;
+    case 2048:
+      g_settings.epromMode = m27040;
+      break;
+    default:
+      g_settings.epromMode = m27020;
+    }
+    f.close();
+  } else {
+    if ( g_fs->exists(filenameLo)) {
+      Serial.write("=> Found romLo.bin\r\n");
       File f = g_fs->open(filenameLo, FILE_READ);
       uint32_t sz = f.size();
       sz = sz <= sizeof(bufferLo) ? sz : sizeof(bufferLo);
@@ -130,12 +173,12 @@ void setup()
       f.close();
     }
 
-  if ( g_fs->exists(filenameHi)) {
+    if ( g_fs->exists(filenameHi)) {
       File f = g_fs->open(filenameHi, FILE_READ);
       f.read(bufferHi, f.size());
       f.close();
     }
-
+  }
   setPinMode(inPins, INPUT);
   setPinMode(outPins, OUTPUT);
   GPIO7_DR = 0;
@@ -188,7 +231,7 @@ void loop()
     case m27010:
       if(g_settings.lynxMode)
         {
-          addr =    io6 & 0x001FF;         // Lynx A0 - A8   -> EPROM A0 - A8
+          addr =    io6 & 0x001FF;         // Lynx A0  - A8  -> EPROM A0 - A8
           addr |=  (io6 >> 2)  & 0x03E00;  // Lynx A12 - A17 -> EPROM A11 - A15
           addr |= ((io9 << 10) & 0x1C000); // Lynx A18 - A19 -> EPROM A16
         }
@@ -198,9 +241,8 @@ void loop()
 
       // 2Mbit, 256KB, 0x00000-0x3FFFF
     case m27020:
-      if(g_settings.lynxMode)
-        {
-          addr =    io6 & 0x003FF;         // Lynx A0 - A9   -> EPROM A0 - A9
+      if(g_settings.lynxMode) {
+          addr =    io6 & 0x003FF;         // Lynx A0  - A9  -> EPROM A0 - A9
           addr |=  (io6 >> 1)  & 0x07C00;  // Lynx A12 - A17 -> EPROM A11 - A15
           addr |= ((io9 << 11) & 0x38000); // Lynx A18 - A19 -> EPROM A16 - A17
         }
@@ -210,6 +252,12 @@ void loop()
 
       // 4Mbit, 512KB, 0x00000-0x7FFFF
     case m27040:
+      if(g_settings.lynxMode) {
+        // XXX: check for AUDIN
+          addr =   io6;  // Lynx A0  - A10, A12-A17 -> EPROM A0 - A10, A11-A15
+          addr |= ((io9 << 12) & 0x70000); // Lynx A18 - A19 -> EPROM A16 - A17
+        }
+      else
       addr = (io6 & 0xFFFF) | ((io9 << 12) & 0x70000);
       break;
 
