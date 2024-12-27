@@ -105,16 +105,17 @@ void setPinMode(const int32_t* pins, uint32_t direction)
 }
 
 
-int checkSD()
+void checkSD()
 {
-  int found = 0;
+  SD.begin(BUILTIN_SDCARD);
+  g_fs = (FS*)&SD;
 
   if ( g_fs->exists(filenameLNX)) {
-    printf("=> Found game.lnx:");
+    Serial.printf("=> Found game.lnx:");
     File f = g_fs->open(filenameLNX, FILE_READ);
     int32_t sz = (int32_t)f.size();
     f.read(&lnx_header,64);
-    printf("Size %ld\r\n",sz);
+    Serial.printf("Size %ld\r\n",sz);
     Serial.flush();
     sz -= 64;
     f.read(bufferLo, min(sz,(int32_t)sizeof(bufferLo)));
@@ -136,39 +137,29 @@ int checkSD()
       cSize = _256K;
     }
     f.close();
-    found = 1;
-  } else {
-    if ( g_fs->exists(filenameLo)) {
+  } else if ( g_fs->exists(filenameLo)) {
       File f = g_fs->open(filenameLo, FILE_READ);
       uint32_t sz = f.size();
       sz = sz <= sizeof(bufferLo) ? sz : sizeof(bufferLo);
       f.read(bufferLo, sz);
       f.close();
-      found = 1;
-    }
-
-    if ( g_fs->exists(filenameHi)) {
+  } else if ( g_fs->exists(filenameHi)) {
       File f = g_fs->open(filenameHi, FILE_READ);
       f.read(bufferHi, f.size());
       f.close();
-      found = 1;
-    }
+  } else {
+    Serial.printf("No file found, switch to uBLL\r\n");
+    memcpy(bufferLo, uBLL, sizeof(uBLL));
+    cSize = _256K;
   }
-  return found;
 }
 
 void setup()
 {
   Serial.begin(115200*8);
 
-  SD.begin(BUILTIN_SDCARD);
-  g_fs = (FS*)&SD;
+  checkSD();
 
-  if ( checkSD() == 0 ){
-    printf("No file found, switch to uBLL\r\n");
-    memcpy(bufferLo, uBLL, sizeof(uBLL));
-    cSize = _256K;
-  }
   setPinMode(inPins, INPUT);
   setPinMode(outPins, OUTPUT);
   GPIO7_DR = 0;
@@ -223,8 +214,25 @@ void loop()
   GPIO7_DR = (b & 0x0F) | ((b & 0xF0) << 12);
 
   // read file from serial port, if available
-  if(Serial.available())
-    readData(&Serial);
+  if(Serial.available()){
+    char command[2];
+    command[0] = 0;
+   Serial.readBytes(command,2);
+    if ( command[0] == 'C' ){
+      switch (command[1] ){
+      case 'R':
+        checkSD();
+        break;
+      case 'L':
+        //->    readLNX(s);
+        break;
+      case 'U':
+        readChunk(&Serial, bufferLo, ROM_BUFFER_LEN, filenameLo);
+        readChunk(&Serial, bufferHi, ROM_BUFFER_LEN, filenameHi);
+        break;
+      }
+    }
+  }
 }
 
 //  DM     Non-DMA
