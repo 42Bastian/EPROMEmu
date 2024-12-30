@@ -41,10 +41,11 @@ class LNXheader:
 verbose=True
 blocksize=1024
 
-baud=115200
+baud=115200*8
 port='/dev/tty.usbmodem165120401'
 imhd=bytearray(10)
 image=bytearray(512*1024)
+lnxhead=bytearray(64);
 filename=""
 
 def sendByte(byte: int):
@@ -63,25 +64,38 @@ def getByte() -> int:
     else:
         return -1
 
-def loadImage(filename, verbose) -> bytearray:
+def loadImage(filename, verbose):
     global image
+    global lnxhead
     image.clear()
-    lnxhead=LNXheader()
+#    lnxhead=LNXheader()
     try:
         fd = open(filename,'rb')
-        lnxhead.fromFile(fd.read(64))
+    except:
+        print("Error opening ",filename)
+        exit(1)
+    try:
+        lnxhead = bytearray(fd.read(64))
+    except:
+        print("Error reading header of",filename)
+        exit(1)
+
+    s =  (lnxhead[4]+lnxhead[5]*256)
+
+    try:
+        s *= 256
         image = bytearray(fd.read())
-        l = len(image);
-        if ( l != lnxhead.page_size_bank0*256 ):
-            print("Size only ",len(image))
-            for i in range(0,lnxhead.page_size_bank0*256-l):
+        l = len(image)
+        if ( l != s ):
+            if verbose :
+                print("Size only ",len(image))
+            for i in range(0,s-l):
                 image.append(0xff)
-        fd.close
     except:
         print("Error reading ",filename)
         exit(1)
 
-    return lnxhead
+    fd.close
 
 ##################################
 
@@ -134,25 +148,16 @@ except:
     exit(1)
 
 
-lnxhead = loadImage(filename, verbose)
-blocksize = lnxhead.page_size_bank0
+loadImage(filename, verbose)
 
 if verbose :
     print("Port:", port,"\nBaud:",baud)
     print("Sending: ",filename)
-    print("Blocksize:",blocksize)
 
-print("Sending")
-# Send settings
-if ( blocksize == 512 ):
-    sendByte(8)
-
-if ( blocksize == 1024 ):
-    sendByte(9)
-
-if ( blocksize == 2048 ):
-    sendByte(10)
-
-sendByte(1)
-ser.write(image);
-ser.close();
+sendByte(b'c')
+sendByte(b'l')
+ser.write(lnxhead)
+ser.flush()
+ser.write(image)
+ser.flush()
+ser.close()
