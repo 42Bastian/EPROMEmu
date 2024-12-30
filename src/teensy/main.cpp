@@ -1,3 +1,9 @@
+/*
+** Teensy 4.1 firmware for LynxCartEmu
+**
+** (c) 2024 Brian Peek (original) and 42Bastian Schick (Lynx version)
+**
+*/
 // FLASHMEM
 // DMAMEM
 // PROGMEM
