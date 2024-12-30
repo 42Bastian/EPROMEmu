@@ -1,3 +1,19 @@
+# LynxCartEmu
+
+This repo is based on Brian's repo, see original comments below.
+
+This fork is solely to support Atari Lynx Carts.
+Upon start, the firmware loads either a `game.lnx` file or if not available provides a uBLL for Lynx.
+
+A new ROM image can be uploaded (as .lnx file) and will be stored in internal RAM and on SD card (if available) for the next boot.
+
+Sending is done via `SendCard.py`.
+
+The firmware allows to "reload" the SD cart via serial command `cr` if game.lnx was saved on a PC on the card.
+
+
+---
+
 # EPROMEmu
 
 **!! WARNING: I have no idea what I'm doing !!**

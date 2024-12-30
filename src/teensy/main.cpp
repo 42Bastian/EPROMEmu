@@ -3,7 +3,6 @@
 // PROGMEM
 
 #include <Arduino.h>
-//->#include <SPI.h>
 #include <SD.h>
 #include <stdint.h>
 #include "ubll.h"
@@ -17,22 +16,21 @@ enum cardSize : uint8_t {
 
 typedef struct
 {
-  uint8_t   magic[4];
-  uint16_t   page_size_bank0;
-  uint16_t   page_size_bank1;
-  uint16_t   version;
-  char   cartname[32];
-  char   manufname[16];
-  char   rotation;
-  char audBit;
-  char eeprom;
-  char spare[3];
+  uint8_t  magic[4];
+  uint16_t page_size_bank0;
+  uint16_t page_size_bank1;
+  uint16_t version;
+  char     cartname[32];
+  char     manufname[16];
+  char     rotation;
+  char     audBit;
+  char     eeprom;
+  char     spare[3];
 } lnx_header_t;
 
 constexpr size_t   ROM_BUFFER_LEN       = (256*1024);
 constexpr uint32_t ROM_BUFFER_HI_MASK   = (ROM_BUFFER_LEN-1);
 constexpr size_t   TOTAL_ROM_BUFFER_LEN = (2*ROM_BUFFER_LEN);
-constexpr size_t   READ_CHUNK_LENGTH    = (1024);
 
 uint8_t bufferLo[ROM_BUFFER_LEN] {};
 DMAMEM uint8_t bufferHi[ROM_BUFFER_LEN] {};
@@ -44,44 +42,11 @@ const int32_t outPins[] = {
   10,12,11,13,8,7,36,37, -1
 };
 
-constexpr const char *filenameLo       = "romLo.bin";
-constexpr const char *filenameHi       = "romHi.bin";
 constexpr const char *filenameLNX      = "game.lnx";
 FS* g_fs = nullptr;
 lnx_header_t lnx_header;
 cardSize cSize = _256K;
-uint8_t chunk[READ_CHUNK_LENGTH];
 
-void readChunk(Stream* s, uint8_t* buffer, size_t size, const char* filename)
-{
-  size_t read = 0;
-  size_t total = 0;
-  uint8_t* p = buffer;
-
-  memset(buffer, 0xFF, size);
-
-  do {
-    memset(chunk, 0, READ_CHUNK_LENGTH);
-
-    read = s->readBytes(chunk, READ_CHUNK_LENGTH);
-
-    if(read > 0) {
-      memcpy(p, chunk, read);
-      p += read;
-      total += read;
-    }
-  } while(read != 0 && total < size);
-
-  g_fs->remove(filename);
-
-  if(total > 0) {
-    File f = g_fs->open(filename, FILE_WRITE);
-    f.write(buffer, total);
-    f.close();
-  }
-}
-
-size_t last_e = 0;
 int readLNX(Stream *s)
 {
   size_t read;
@@ -126,27 +91,42 @@ int readLNX(Stream *s)
     expected -= read;
   }
 
-  last_e = expected;
-//->  if( expected != 0 ) {
-//->    return 0;
-//->  }
-  g_fs->remove(filenameLNX);
+  if( expected != 0 ) {
+    return 0;
+  }
+
+  switch (lnx_header.page_size_bank0){
+  case 512:
+    cSize = _128K;
+    break;
+  case 1024:
+    cSize = _256K;
+    break;
+  case 2048:
+    cSize = _512K;
+    break;
+  default:
+    cSize = _1M;
+  }
+
+  if ( g_fs->exists(filenameLNX)) {
+    g_fs->remove(filenameLNX);
+  }
+
   File f = g_fs->open(filenameLNX, FILE_WRITE);
 
-  f.write((uint8_t *)&lnx_header, sizeof(lnx_header_t));
+  if ( f ){
+    f.write((uint8_t *)&lnx_header, sizeof(lnx_header_t));
 
-  expected = lnx_header.page_size_bank0 * 256;
-  expected += lnx_header.page_size_bank1 * 256;
+    expected = lnx_header.page_size_bank0 * 256;
+    expected += lnx_header.page_size_bank1 * 256;
 
-  f.write(bufferLo, min(sizeof(bufferLo),expected));
-  f.write(bufferHi, expected-sizeof(bufferLo));
-  f.close();
-
+    f.write(bufferLo, min(sizeof(bufferLo),expected));
+    f.write(bufferHi, expected-sizeof(bufferLo));
+    f.close();
+  }
   return 1;
 }
-
-
-
 
 void setPinMode(const int32_t* pins, uint32_t direction)
 {
@@ -154,7 +134,6 @@ void setPinMode(const int32_t* pins, uint32_t direction)
     pinMode(pins[i], direction);
   }
 }
-
 
 void checkSD()
 {
@@ -191,19 +170,12 @@ void checkSD()
     }
     Serial.printf("Banksize: %d\r\n%s\r\n",cSize,lnx_header.cartname);
     f.close();
-  } else if ( g_fs->exists(filenameLo)) {
-      File f = g_fs->open(filenameLo, FILE_READ);
-      uint32_t sz = f.size();
-      sz = sz <= sizeof(bufferLo) ? sz : sizeof(bufferLo);
-      f.read(bufferLo, sz);
-      f.close();
-  } else if ( g_fs->exists(filenameHi)) {
-      File f = g_fs->open(filenameHi, FILE_READ);
-      f.read(bufferHi, f.size());
-      f.close();
   } else {
     Serial.printf("No file found, switch to uBLL\r\n");
     memcpy(bufferLo, uBLL, sizeof(uBLL));
+    strcpy(lnx_header.cartname, "uBLL");
+    lnx_header.page_size_bank0 = 1024;
+    lnx_header.page_size_bank1 = 0;
     cSize = _256K;
   }
 }
@@ -221,9 +193,9 @@ void setup()
 
 void loop()
 {
-  uint32_t io6 = (GPIO6_DR >> 16);	//  A0 - A15
-  uint32_t io9 = GPIO9_DR;		// A16 - A19
-  uint32_t addr = 0;			// calculated address
+  uint32_t io6 = (GPIO6_DR >> 16);      //  A0 - A15
+  uint32_t io9 = GPIO9_DR;              // A16 - A19
+  uint32_t addr = 0;                    // calculated address
 
   switch(cSize) {
     // 1Mbit, 128KB, 0x00000-0x1FFFF
@@ -282,19 +254,24 @@ void loop()
           checkSD();
         }
         break;
+      case 'i':
+        Serial.printf("Name: %s\r\n"
+                      "Page0: %d\r\n"
+                      "Page1: %d\r\n"
+                      ,lnx_header.cartname
+                      ,lnx_header.page_size_bank0
+                      ,lnx_header.page_size_bank1
+                      );
+        break;
+
       case 'h':
         {
-          Serial.printf("%ld\r\n",last_e);
 //->          uint8_t *p = (uint8_t *)bufferLo;
 //->          for(int i = 0; i < 64;++i){
 //->            Serial.printf("%02x ",*p++);
 //->          }
 //->          Serial.printf("\n\r");
         }
-        break;
-      case 'u':
-        readChunk(&Serial, bufferLo, ROM_BUFFER_LEN, filenameLo);
-        readChunk(&Serial, bufferHi, ROM_BUFFER_LEN, filenameHi);
         break;
       }
     }

@@ -153,6 +153,7 @@ loadImage(filename, verbose)
 if verbose :
     print("Port:", port,"\nBaud:",baud)
     print("Sending: ",filename)
+    print("Size: ",len(image))
 
 sendByte(b'c')
 sendByte(b'l')
